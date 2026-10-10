@@ -87,6 +87,16 @@ def extract_json_records(raw_text: str):
     raise ValueError("El contenido no se pudo interpretar como JSON válido.")
 
 
+def format_file_size(size_bytes):
+    if pd.isna(size_bytes):
+        return "N/D"
+    if size_bytes < 1024 ** 2:
+        return f"{size_bytes / 1024:.2f} KB"
+    if size_bytes < 1024 ** 3:
+        return f"{size_bytes / (1024 ** 2):.2f} MB"
+    return f"{size_bytes / (1024 ** 3):.2f} GB"
+
+
 def build_metrics_by_job(file_sources):
     rows = []
     errors = []
@@ -111,9 +121,17 @@ def build_metrics_by_job(file_sources):
 
                 job_number = str(record.get("JobNumber") or "UNKNOWN")
                 cpu = record.get("CpuAveragePercent")
+                duration_ms = record.get("DurationMs")
+                cpu_peak = record.get("CpuPeakPercent")
+                input_bytes = record.get("InputBytes")
                 records_count = record.get("Records")
                 start = record.get("ProcessingStartUtc") or record.get("ProcessingStartLocal")
                 end = record.get("ProcessingEndUtc") or record.get("ProcessingEndLocal")
+                is_summary = (
+                    record.get("EventType") == "JobSummary"
+                    or record.get("WorkItemId") == "SUMMARY"
+                    or record.get("File") == "JOB_SUMMARY"
+                )
 
                 if cpu is not None and records_count is not None:
                     rows.append(
@@ -121,11 +139,15 @@ def build_metrics_by_job(file_sources):
                             "Archivo": file_name,
                             "JobNumber": job_number,
                             "CpuAveragePercent": cpu,
+                            "DurationMs": duration_ms,
+                            "CpuPeakPercent": cpu_peak,
+                            "InputBytes": input_bytes,
                             "Records": records_count,
                             "Site": record.get("Site", "N/A"),
                             "Status": record.get("Status", "N/A"),
                             "Inicio": start,
                             "Fin": end,
+                            "EsResumen": is_summary,
                         }
                     )
         except Exception as exc:
@@ -133,12 +155,22 @@ def build_metrics_by_job(file_sources):
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["CpuAveragePercent"] = pd.to_numeric(df["CpuAveragePercent"], errors="coerce")
-        df["Records"] = pd.to_numeric(df["Records"], errors="coerce")
+        numeric_columns = [
+            "CpuAveragePercent",
+            "DurationMs",
+            "CpuPeakPercent",
+            "InputBytes",
+            "Records",
+        ]
+        for column in numeric_columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
         df = df.dropna(subset=["CpuAveragePercent", "Records"]).reset_index(drop=True)
 
     if df.empty:
         return df, errors
+
+    has_details = df.groupby("JobNumber")["EsResumen"].transform(lambda values: (~values).any())
+    df = df.loc[~df["EsResumen"] | ~has_details].reset_index(drop=True)
 
     df["Inicio_ts"] = pd.to_datetime(df["Inicio"], errors="coerce")
     df["Fin_ts"] = pd.to_datetime(df["Fin"], errors="coerce")
@@ -153,6 +185,9 @@ def build_metrics_by_job(file_sources):
             Inicio=("Inicio_ts", "min"),
             Fin=("Fin_ts", "max"),
             MediaUsoCPU=("CpuAveragePercent", "mean"),
+            DuracionTotalMs=("DurationMs", "sum"),
+            PicoUsoCPU=("CpuPeakPercent", "max"),
+            TotalInputBytes=("InputBytes", "sum"),
             TotalRecords=("Records", "sum"),
             RegistrosAnalizados=("Records", "count"),
             Archivos=("Archivo", "nunique"),
@@ -164,6 +199,7 @@ def build_metrics_by_job(file_sources):
 
     grouped["DuracionSegundos"] = (grouped["Fin"] - grouped["Inicio"]).dt.total_seconds()
     grouped["DuracionMinutos"] = (grouped["DuracionSegundos"] / 60).round(2)
+    grouped["TamanoTotal"] = grouped["TotalInputBytes"].map(format_file_size)
     return grouped, errors
 
 
@@ -219,7 +255,8 @@ if file_sources:
         st.dataframe(
             metrics_df,
             column_config={
-                "MediaUsoCPU": st.column_config.NumberColumn("MediaUsoCPU", format="%.2f%%")
+                "MediaUsoCPU": st.column_config.NumberColumn("MediaUsoCPU", format="%.2f%%"),
+                "PicoUsoCPU": st.column_config.NumberColumn("PicoUsoCPU", format="%.2f%%"),
             },
             use_container_width=True,
         )
@@ -247,6 +284,20 @@ if file_sources:
         )
         st.altair_chart(duration_chart, use_container_width=True)
 
+        st.subheader("Duración acumulada por JobNumber (ms)")
+        duration_ms_chart = (
+            alt.Chart(metrics_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("JobNumber:N", sort="-y"),
+                y=alt.Y("DuracionTotalMs:Q", title="Duración acumulada (ms)"),
+                color="JobNumber:N",
+                tooltip=["JobNumber:N", alt.Tooltip("DuracionTotalMs:Q", format=",.0f")],
+            )
+            .properties(height=350)
+        )
+        st.altair_chart(duration_ms_chart, use_container_width=True)
+
         st.subheader("CPU promedio por JobNumber")
         cpu_chart = (
             alt.Chart(metrics_df)
@@ -267,6 +318,52 @@ if file_sources:
             .properties(height=350)
         )
         st.altair_chart(cpu_chart, use_container_width=True)
+
+        st.subheader("Pico de uso de CPU (CpuPeakPercent) por JobNumber")
+        cpu_peak_data = metrics_df.dropna(subset=["PicoUsoCPU"])
+        if cpu_peak_data.empty:
+            st.info("Los archivos seleccionados no contienen valores válidos de CpuPeakPercent.")
+        else:
+            cpu_peak_chart = (
+                alt.Chart(cpu_peak_data)
+                .mark_bar()
+                .encode(
+                    x=alt.X("JobNumber:N", sort="-y"),
+                    y=alt.Y(
+                        "PicoUsoCPU:Q",
+                        title="Pico de uso de CPU (%)",
+                        axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
+                    ),
+                    color="JobNumber:N",
+                    tooltip=["JobNumber:N", alt.Tooltip("PicoUsoCPU:Q", title="CpuPeakPercent", format=".2f")],
+                )
+                .properties(height=350)
+            )
+            st.altair_chart(cpu_peak_chart, use_container_width=True)
+
+        st.subheader("Tamaño total de archivos por JobNumber")
+        input_size_chart = (
+            alt.Chart(metrics_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("JobNumber:N", sort="-y"),
+                y=alt.Y(
+                    "TotalInputBytes:Q",
+                    title="Tamaño total",
+                    axis=alt.Axis(
+                        labelExpr=(
+                            "datum.value < 1048576 ? format(datum.value / 1024, '.2f') + ' KB' : "
+                            "datum.value < 1073741824 ? format(datum.value / 1048576, '.2f') + ' MB' : "
+                            "format(datum.value / 1073741824, '.2f') + ' GB'"
+                        )
+                    ),
+                ),
+                color="JobNumber:N",
+                tooltip=["JobNumber:N", alt.Tooltip("TamanoTotal:N", title="Tamaño total")],
+            )
+            .properties(height=350)
+        )
+        st.altair_chart(input_size_chart, use_container_width=True)
 
         st.subheader("Records totales por JobNumber")
         records_chart = (
@@ -291,13 +388,17 @@ if file_sources:
                     "Fin",
                     "RegistrosAnalizados",
                     "MediaUsoCPU",
+                    "DuracionTotalMs",
+                    "PicoUsoCPU",
+                    "TamanoTotal",
                     "TotalRecords",
                     "DuracionMinutos",
                     "Archivos",
                 ]
             ],
             column_config={
-                "MediaUsoCPU": st.column_config.NumberColumn("MediaUsoCPU", format="%.2f%%")
+                "MediaUsoCPU": st.column_config.NumberColumn("MediaUsoCPU", format="%.2f%%"),
+                "PicoUsoCPU": st.column_config.NumberColumn("PicoUsoCPU", format="%.2f%%"),
             },
             use_container_width=True,
         )
