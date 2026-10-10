@@ -245,29 +245,14 @@ if st.button("Limpiar todo", type="secondary"):
     st.session_state.pop("file_sources", None)
     st.rerun()
 
-project_root = Path(__file__).resolve().parent
-json_candidates = sorted(project_root.rglob("*.json"), key=lambda p: str(p).lower())
-options = [str(path) for path in json_candidates]
-
-selected_paths = st.multiselect(
-    "Selecciona archivos JSON del proyecto",
-    options=options,
-    default=[],
-    key="selected_paths",
-)
-
 uploaded_files = st.file_uploader(
-    "O súbelo desde tu equipo (puedes seleccionar varios)",
+    "Selecciona uno o varios archivos JSON",
     type=["json"],
     accept_multiple_files=True,
     key="uploaded_files",
 )
 
-file_sources = []
-for path in selected_paths:
-    file_sources.append(path)
-for uploaded in uploaded_files or []:
-    file_sources.append(uploaded)
+file_sources = list(uploaded_files or [])
 st.session_state["file_sources"] = file_sources
 
 if file_sources:
@@ -301,14 +286,14 @@ if file_sources:
                 x=alt.X(
                     "JobNumber:N",
                     sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y=alt.Y(
                     "DuracionSegundos:Q",
                     title="Duración (segundos)",
                     axis=alt.Axis(format=".2f"),
                 ),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
                 tooltip=[
                     "JobNumber:N",
                     alt.Tooltip("DuracionSegundos:Q", format=".2f"),
@@ -328,10 +313,10 @@ if file_sources:
                 x=alt.X(
                     "JobNumber:N",
                     sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y=alt.Y("DuracionTotalMs:Q", title="Duración acumulada (ms)"),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
                 tooltip=["JobNumber:N", alt.Tooltip("DuracionTotalMs:Q", format=",.0f")],
             )
             .properties(height=350)
@@ -347,13 +332,13 @@ if file_sources:
                 x=alt.X(
                     "JobNumber:N",
                     sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y=alt.Y(
                     "MediaUsoCPU:Q",
                     axis=alt.Axis(labelExpr="format(datum.value, '.2f') + '%'"),
                 ),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
                 tooltip=[
                     "JobNumber:N",
                     alt.Tooltip("MediaUsoCPUFormato:N", title="CPU promedio"),
@@ -375,14 +360,14 @@ if file_sources:
                     x=alt.X(
                         "JobNumber:N",
                         sort="-y",
-                        axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                        axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                     ),
                     y=alt.Y(
                         "PicoUsoCPU:Q",
                         title="Pico de uso de CPU (%)",
                         axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
                     ),
-                    color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
+                    color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
                     tooltip=["JobNumber:N", alt.Tooltip("PicoUsoCPU:Q", title="CpuPeakPercent", format=".2f")],
                 )
                 .properties(height=350)
@@ -397,7 +382,7 @@ if file_sources:
                 x=alt.X(
                     "JobNumber:N",
                     sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y=alt.Y(
                     "TotalInputBytes:Q",
@@ -410,7 +395,7 @@ if file_sources:
                         )
                     ),
                 ),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
                 tooltip=["JobNumber:N", alt.Tooltip("TamanoTotal:N", title="Tamaño total")],
             )
             .properties(height=350)
@@ -425,10 +410,10 @@ if file_sources:
                 x=alt.X(
                     "JobNumber:N",
                     sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y="TotalRecords:Q",
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
                 tooltip=["JobNumber:N", "TotalRecords:Q"],
             )
             .properties(height=350)
@@ -459,4 +444,4 @@ if file_sources:
             use_container_width=True,
         )
 else:
-    st.info("Selecciona uno o varios archivos JSON o súbelos desde tu equipo para comparar métricas por JobNumber.")
+    st.info("Selecciona uno o varios archivos JSON para comparar métricas por JobNumber.")
