@@ -97,6 +97,31 @@ def format_file_size(size_bytes):
     return f"{size_bytes / (1024 ** 3):.2f} GB"
 
 
+def select_chart_type(key):
+    return st.radio(
+        "Tipo de gráfica",
+        ["Barras", "Línea", "Puntos", "Área"],
+        horizontal=True,
+        key=key,
+    )
+
+
+def apply_chart_mark(chart, chart_type):
+    if chart_type == "Línea":
+        return chart.mark_line(point=True)
+    if chart_type == "Puntos":
+        return chart.mark_point(filled=True, size=90)
+    if chart_type == "Área":
+        return chart.mark_area()
+    return chart.mark_bar()
+
+
+def job_color(chart_type):
+    if chart_type in ("Línea", "Área"):
+        return alt.value("#367a8c")
+    return alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12))
+
+
 def build_metrics_by_job(file_sources):
     rows = []
     errors = []
@@ -279,9 +304,9 @@ if file_sources:
         )
 
         st.subheader("Duración por JobNumber (segundos)")
+        duration_chart_type = select_chart_type("chart_type_duration")
         duration_chart = (
-            alt.Chart(metrics_df)
-            .mark_bar()
+            apply_chart_mark(alt.Chart(metrics_df), duration_chart_type)
             .encode(
                 x=alt.X(
                     "JobNumber:N",
@@ -293,7 +318,7 @@ if file_sources:
                     title="Duración (segundos)",
                     axis=alt.Axis(format=".2f"),
                 ),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
+                color=job_color(duration_chart_type),
                 tooltip=[
                     "JobNumber:N",
                     alt.Tooltip("DuracionSegundos:Q", format=".2f"),
@@ -306,9 +331,9 @@ if file_sources:
         st.altair_chart(duration_chart, use_container_width=True)
 
         st.subheader("Duración acumulada por JobNumber (ms)")
+        duration_ms_chart_type = select_chart_type("chart_type_duration_ms")
         duration_ms_chart = (
-            alt.Chart(metrics_df)
-            .mark_bar()
+            apply_chart_mark(alt.Chart(metrics_df), duration_ms_chart_type)
             .encode(
                 x=alt.X(
                     "JobNumber:N",
@@ -316,7 +341,7 @@ if file_sources:
                     axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y=alt.Y("DuracionTotalMs:Q", title="Duración acumulada (ms)"),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
+                color=job_color(duration_ms_chart_type),
                 tooltip=["JobNumber:N", alt.Tooltip("DuracionTotalMs:Q", format=",.0f")],
             )
             .properties(height=350)
@@ -324,10 +349,10 @@ if file_sources:
         st.altair_chart(duration_ms_chart, use_container_width=True)
 
         st.subheader("CPU promedio por JobNumber")
+        cpu_chart_type = select_chart_type("chart_type_cpu_average")
         cpu_chart = (
-            alt.Chart(metrics_df)
+            apply_chart_mark(alt.Chart(metrics_df), cpu_chart_type)
             .transform_calculate(MediaUsoCPUFormato="format(datum.MediaUsoCPU, '.2f') + '%' ")
-            .mark_bar()
             .encode(
                 x=alt.X(
                     "JobNumber:N",
@@ -338,7 +363,7 @@ if file_sources:
                     "MediaUsoCPU:Q",
                     axis=alt.Axis(labelExpr="format(datum.value, '.2f') + '%'"),
                 ),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
+                color=job_color(cpu_chart_type),
                 tooltip=[
                     "JobNumber:N",
                     alt.Tooltip("MediaUsoCPUFormato:N", title="CPU promedio"),
@@ -353,9 +378,9 @@ if file_sources:
         if cpu_peak_data.empty:
             st.info("Los archivos seleccionados no contienen valores válidos de CpuPeakPercent.")
         else:
+            cpu_peak_chart_type = select_chart_type("chart_type_cpu_peak")
             cpu_peak_chart = (
-                alt.Chart(cpu_peak_data)
-                .mark_bar()
+                apply_chart_mark(alt.Chart(cpu_peak_data), cpu_peak_chart_type)
                 .encode(
                     x=alt.X(
                         "JobNumber:N",
@@ -367,7 +392,7 @@ if file_sources:
                         title="Pico de uso de CPU (%)",
                         axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
                     ),
-                    color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
+                    color=job_color(cpu_peak_chart_type),
                     tooltip=["JobNumber:N", alt.Tooltip("PicoUsoCPU:Q", title="CpuPeakPercent", format=".2f")],
                 )
                 .properties(height=350)
@@ -375,9 +400,9 @@ if file_sources:
             st.altair_chart(cpu_peak_chart, use_container_width=True)
 
         st.subheader("Tamaño total de archivos por JobNumber")
+        input_size_chart_type = select_chart_type("chart_type_input_size")
         input_size_chart = (
-            alt.Chart(metrics_df)
-            .mark_bar()
+            apply_chart_mark(alt.Chart(metrics_df), input_size_chart_type)
             .encode(
                 x=alt.X(
                     "JobNumber:N",
@@ -395,7 +420,7 @@ if file_sources:
                         )
                     ),
                 ),
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
+                color=job_color(input_size_chart_type),
                 tooltip=["JobNumber:N", alt.Tooltip("TamanoTotal:N", title="Tamaño total")],
             )
             .properties(height=350)
@@ -403,9 +428,9 @@ if file_sources:
         st.altair_chart(input_size_chart, use_container_width=True)
 
         st.subheader("Records totales por JobNumber")
+        records_chart_type = select_chart_type("chart_type_records")
         records_chart = (
-            alt.Chart(metrics_df)
-            .mark_bar()
+            apply_chart_mark(alt.Chart(metrics_df), records_chart_type)
             .encode(
                 x=alt.X(
                     "JobNumber:N",
@@ -413,7 +438,7 @@ if file_sources:
                     axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                 ),
                 y="TotalRecords:Q",
-                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12)),
+                color=job_color(records_chart_type),
                 tooltip=["JobNumber:N", "TotalRecords:Q"],
             )
             .properties(height=350)
