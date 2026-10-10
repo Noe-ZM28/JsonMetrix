@@ -122,6 +122,40 @@ def job_color(chart_type):
     return alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12))
 
 
+def render_comparison_chart(data, metric, title, tooltip_format=None, axis_format=None, axis_label_expr=None):
+    y_axis = alt.Axis(title=title)
+    if axis_format:
+        y_axis.format = axis_format
+    if axis_label_expr:
+        y_axis.labelExpr = axis_label_expr
+
+    chart = (
+        alt.Chart(data)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "JobNumber:N",
+                sort="-y",
+                axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
+            ),
+            xOffset=alt.XOffset("Comparacion:N"),
+            y=alt.Y(f"{metric}:Q", axis=y_axis),
+            color=alt.Color(
+                "Comparacion:N",
+                scale=alt.Scale(domain=["A", "B"], range=["#367a8c", "#d17a45"]),
+                legend=alt.Legend(title="Archivo"),
+            ),
+            tooltip=[
+                "JobNumber:N",
+                alt.Tooltip("Comparacion:N", title="Archivo"),
+                alt.Tooltip(f"{metric}:Q", title=title, format=tooltip_format),
+            ],
+        )
+        .properties(height=350)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
 def build_metrics_by_job(file_sources):
     rows = []
     errors = []
@@ -268,19 +302,192 @@ if st.button("Limpiar todo", type="secondary"):
     st.session_state.pop("selected_paths", None)
     st.session_state.pop("uploaded_files", None)
     st.session_state.pop("file_sources", None)
+    st.session_state.pop("comparison_file_a", None)
+    st.session_state.pop("comparison_file_b", None)
+    st.session_state.pop("app_mode", None)
     st.rerun()
 
-uploaded_files = st.file_uploader(
-    "Selecciona uno o varios archivos JSON",
-    type=["json"],
-    accept_multiple_files=True,
-    key="uploaded_files",
+app_mode = st.radio(
+    "Modo",
+    ["Analizar archivos", "Comparar 2 archivos"],
+    horizontal=True,
+    key="app_mode",
 )
 
-file_sources = list(uploaded_files or [])
+file_sources = []
+comparison_ready = False
+if app_mode == "Comparar 2 archivos":
+    file_col_a, file_col_b = st.columns(2)
+    with file_col_a:
+        comparison_file_a = st.file_uploader(
+            "Archivo A",
+            type=["json"],
+            key="comparison_file_a",
+        )
+    with file_col_b:
+        comparison_file_b = st.file_uploader(
+            "Archivo B",
+            type=["json"],
+            key="comparison_file_b",
+        )
+
+    comparison_ready = comparison_file_a is not None and comparison_file_b is not None
+    if comparison_ready:
+        metrics_a, errors_a = build_metrics_by_job([comparison_file_a])
+        metrics_b, errors_b = build_metrics_by_job([comparison_file_b])
+        for error in errors_a + errors_b:
+            st.warning(f"No se pudo procesar un archivo: {error}")
+
+        if metrics_a.empty or metrics_b.empty:
+            st.error("No se encontraron métricas válidas en ambos archivos para compararlos.")
+        else:
+            st.caption(f"A: {comparison_file_a.name} | B: {comparison_file_b.name}")
+            comparison_fields = [
+                "Inicio",
+                "Fin",
+                "MediaUsoCPU",
+                "DuracionTotalMs",
+                "PicoUsoCPU",
+                "TamanoTotal",
+                "TotalInputBytes",
+                "TotalRecords",
+            ]
+            comparison_a = metrics_a[["JobNumber", *comparison_fields]].rename(
+                columns={field: f"{field} A" for field in comparison_fields}
+            )
+            comparison_b = metrics_b[["JobNumber", *comparison_fields]].rename(
+                columns={field: f"{field} B" for field in comparison_fields}
+            )
+            comparison_df = comparison_a.merge(comparison_b, on="JobNumber", how="outer")
+
+            delta_fields = [
+                ("MediaUsoCPU", "Diferencia CPU (%)"),
+                ("DuracionTotalMs", "Diferencia duración (ms)"),
+                ("PicoUsoCPU", "Diferencia pico CPU (%)"),
+                ("TotalInputBytes", "Diferencia tamaño (bytes)"),
+                ("TotalRecords", "Diferencia records"),
+            ]
+            for field, delta_name in delta_fields:
+                comparison_df[delta_name] = comparison_df[f"{field} B"] - comparison_df[f"{field} A"]
+
+            st.subheader("Comparación por JobNumber")
+            display_fields = [
+                "Inicio",
+                "Fin",
+                "MediaUsoCPU",
+                "DuracionTotalMs",
+                "PicoUsoCPU",
+                "TamanoTotal",
+                "TotalRecords",
+            ]
+            display_config = {
+                "MediaUsoCPU A": st.column_config.NumberColumn("CPU media", format="%.2f%%"),
+                "MediaUsoCPU B": st.column_config.NumberColumn("CPU media", format="%.2f%%"),
+                "PicoUsoCPU A": st.column_config.NumberColumn("Pico CPU", format="%.2f%%"),
+                "PicoUsoCPU B": st.column_config.NumberColumn("Pico CPU", format="%.2f%%"),
+                "DuracionTotalMs A": st.column_config.NumberColumn("Duración (ms)", format="%.0f"),
+                "DuracionTotalMs B": st.column_config.NumberColumn("Duración (ms)", format="%.0f"),
+                "TotalRecords A": st.column_config.NumberColumn("Records", format="%.0f"),
+                "TotalRecords B": st.column_config.NumberColumn("Records", format="%.0f"),
+            }
+            comparison_col_a, comparison_col_b = st.columns(2)
+            with comparison_col_a:
+                st.markdown("**Archivo A**")
+                columns_a = ["JobNumber"] + [f"{field} A" for field in display_fields]
+                st.dataframe(
+                    comparison_df[columns_a],
+                    column_config=display_config,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            with comparison_col_b:
+                st.markdown("**Archivo B**")
+                columns_b = ["JobNumber"] + [f"{field} B" for field in display_fields]
+                st.dataframe(
+                    comparison_df[columns_b],
+                    column_config=display_config,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.markdown("**Diferencias (B - A)**")
+            difference_columns = ["JobNumber"] + [delta_name for _, delta_name in delta_fields]
+            st.dataframe(
+                comparison_df[difference_columns],
+                column_config={
+                    "Diferencia CPU (%)": st.column_config.NumberColumn("CPU (%)", format="%.2f"),
+                    "Diferencia duración (ms)": st.column_config.NumberColumn("Duración (ms)", format="%.0f"),
+                    "Diferencia pico CPU (%)": st.column_config.NumberColumn("Pico CPU (%)", format="%.2f"),
+                    "Diferencia tamaño (bytes)": st.column_config.NumberColumn("Tamaño (bytes)", format="%.0f"),
+                    "Diferencia records": st.column_config.NumberColumn("Records", format="%.0f"),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            comparison_chart_data = pd.concat(
+                [
+                    metrics_a.assign(Comparacion="A"),
+                    metrics_b.assign(Comparacion="B"),
+                ],
+                ignore_index=True,
+            )
+            st.subheader("Gráficas comparativas")
+            render_comparison_chart(
+                comparison_chart_data,
+                "DuracionTotalMs",
+                "Duración acumulada (ms)",
+                tooltip_format=",.0f",
+                axis_format=",.0f",
+            )
+            render_comparison_chart(
+                comparison_chart_data,
+                "MediaUsoCPU",
+                "CPU media (%)",
+                tooltip_format=".2f",
+                axis_format=".2f",
+                axis_label_expr="format(datum.value, '.2f') + '%'",
+            )
+            render_comparison_chart(
+                comparison_chart_data.dropna(subset=["PicoUsoCPU"]),
+                "PicoUsoCPU",
+                "Pico de CPU (%)",
+                tooltip_format=".2f",
+                axis_format=".2f",
+                axis_label_expr="format(datum.value, '.2f') + '%'",
+            )
+            render_comparison_chart(
+                comparison_chart_data,
+                "TotalInputBytes",
+                "Tamaño de archivos",
+                tooltip_format=",.0f",
+                axis_label_expr=(
+                    "datum.value < 1048576 ? format(datum.value / 1024, '.2f') + ' KB' : "
+                    "datum.value < 1073741824 ? format(datum.value / 1048576, '.2f') + ' MB' : "
+                    "format(datum.value / 1073741824, '.2f') + ' GB'"
+                ),
+            )
+            render_comparison_chart(
+                comparison_chart_data,
+                "TotalRecords",
+                "Records totales",
+                tooltip_format=",.0f",
+                axis_format=",.0f",
+            )
+    else:
+        st.info("Carga los archivos A y B para ver su comparación por JobNumber.")
+else:
+    uploaded_files = st.file_uploader(
+        "Selecciona uno o varios archivos JSON",
+        type=["json"],
+        accept_multiple_files=True,
+        key="uploaded_files",
+    )
+    file_sources = list(uploaded_files or [])
+
 st.session_state["file_sources"] = file_sources
 
-if file_sources:
+if app_mode == "Analizar archivos" and file_sources:
     metrics_df, errors = build_metrics_by_job(file_sources)
 
     if errors:
@@ -468,5 +675,5 @@ if file_sources:
             },
             use_container_width=True,
         )
-else:
+elif app_mode == "Analizar archivos":
     st.info("Selecciona uno o varios archivos JSON para comparar métricas por JobNumber.")
