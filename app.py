@@ -203,7 +203,39 @@ def build_metrics_by_job(file_sources):
     return grouped, errors
 
 
-st.set_page_config(page_title="JsonMetrix", page_icon="📊")
+st.set_page_config(page_title="JsonMetrix", page_icon="📊", layout="wide")
+st.markdown(
+    """
+    <style>
+    [data-testid="stMainBlockContainer"] {
+        box-sizing: border-box;
+        width: 70%;
+        max-width: 70%;
+        margin-left: auto;
+        margin-right: auto;
+        padding-left: clamp(1rem, 2.5vw, 2.5rem);
+        padding-right: clamp(1rem, 2.5vw, 2.5rem);
+    }
+
+    @media (max-width: 1024px) {
+        [data-testid="stMainBlockContainer"] {
+            width: 90%;
+            max-width: 90%;
+        }
+    }
+
+    @media (max-width: 640px) {
+        [data-testid="stMainBlockContainer"] {
+            width: 100%;
+            max-width: 100%;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 st.title("JsonMetrix")
 st.write("Carga uno o varios archivos JSON y compara el uso de CPU y la cantidad de registros.")
 
@@ -266,18 +298,22 @@ if file_sources:
             alt.Chart(metrics_df)
             .mark_bar()
             .encode(
-                x=alt.X("JobNumber:N", sort="-y"),
+                x=alt.X(
+                    "JobNumber:N",
+                    sort="-y",
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                ),
                 y=alt.Y(
                     "DuracionSegundos:Q",
                     title="Duración (segundos)",
                     axis=alt.Axis(format=".2f"),
                 ),
-                color="JobNumber:N",
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
                 tooltip=[
                     "JobNumber:N",
                     alt.Tooltip("DuracionSegundos:Q", format=".2f"),
-                    "Inicio:T",
-                    "Fin:T",
+                    alt.Tooltip("Inicio:T", title="Inicio", format="%Y-%m-%d %H:%M:%S.%L"),
+                    alt.Tooltip("Fin:T", title="Fin", format="%Y-%m-%d %H:%M:%S.%L"),
                 ],
             )
             .properties(height=350)
@@ -289,9 +325,13 @@ if file_sources:
             alt.Chart(metrics_df)
             .mark_bar()
             .encode(
-                x=alt.X("JobNumber:N", sort="-y"),
+                x=alt.X(
+                    "JobNumber:N",
+                    sort="-y",
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                ),
                 y=alt.Y("DuracionTotalMs:Q", title="Duración acumulada (ms)"),
-                color="JobNumber:N",
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
                 tooltip=["JobNumber:N", alt.Tooltip("DuracionTotalMs:Q", format=",.0f")],
             )
             .properties(height=350)
@@ -304,12 +344,16 @@ if file_sources:
             .transform_calculate(MediaUsoCPUFormato="format(datum.MediaUsoCPU, '.2f') + '%' ")
             .mark_bar()
             .encode(
-                x=alt.X("JobNumber:N", sort="-y"),
+                x=alt.X(
+                    "JobNumber:N",
+                    sort="-y",
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                ),
                 y=alt.Y(
                     "MediaUsoCPU:Q",
                     axis=alt.Axis(labelExpr="format(datum.value, '.2f') + '%'"),
                 ),
-                color="JobNumber:N",
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
                 tooltip=[
                     "JobNumber:N",
                     alt.Tooltip("MediaUsoCPUFormato:N", title="CPU promedio"),
@@ -328,13 +372,17 @@ if file_sources:
                 alt.Chart(cpu_peak_data)
                 .mark_bar()
                 .encode(
-                    x=alt.X("JobNumber:N", sort="-y"),
+                    x=alt.X(
+                        "JobNumber:N",
+                        sort="-y",
+                        axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                    ),
                     y=alt.Y(
                         "PicoUsoCPU:Q",
                         title="Pico de uso de CPU (%)",
                         axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
                     ),
-                    color="JobNumber:N",
+                    color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
                     tooltip=["JobNumber:N", alt.Tooltip("PicoUsoCPU:Q", title="CpuPeakPercent", format=".2f")],
                 )
                 .properties(height=350)
@@ -346,7 +394,11 @@ if file_sources:
             alt.Chart(metrics_df)
             .mark_bar()
             .encode(
-                x=alt.X("JobNumber:N", sort="-y"),
+                x=alt.X(
+                    "JobNumber:N",
+                    sort="-y",
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                ),
                 y=alt.Y(
                     "TotalInputBytes:Q",
                     title="Tamaño total",
@@ -358,7 +410,7 @@ if file_sources:
                         )
                     ),
                 ),
-                color="JobNumber:N",
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
                 tooltip=["JobNumber:N", alt.Tooltip("TamanoTotal:N", title="Tamaño total")],
             )
             .properties(height=350)
@@ -370,9 +422,13 @@ if file_sources:
             alt.Chart(metrics_df)
             .mark_bar()
             .encode(
-                x=alt.X("JobNumber:N", sort="-y"),
+                x=alt.X(
+                    "JobNumber:N",
+                    sort="-y",
+                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=9),
+                ),
                 y="TotalRecords:Q",
-                color="JobNumber:N",
+                color=alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=9)),
                 tooltip=["JobNumber:N", "TotalRecords:Q"],
             )
             .properties(height=350)
