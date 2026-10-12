@@ -116,10 +116,41 @@ def apply_chart_mark(chart, chart_type):
     return chart.mark_bar()
 
 
+def chart_palette():
+    active_theme = st.context.theme or {}
+    theme_base = active_theme.get("type") or st.get_option("theme.base")
+    if theme_base == "dark":
+        return [
+            "#39FF14",
+            "#00E5FF",
+            "#FF2E88",
+            "#FFF01F",
+            "#B967FF",
+            "#FF7A00",
+            "#00FFB3",
+            "#FF4D4D",
+        ]
+    return [
+        "#123B5D",
+        "#552583",
+        "#006B5B",
+        "#8A3A00",
+        "#9B174C",
+        "#3D4F00",
+        "#174A8B",
+        "#5E3A1C",
+    ]
+
+
 def job_color(chart_type):
+    palette = chart_palette()
     if chart_type in ("Línea", "Área"):
-        return alt.value("#367a8c")
-    return alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12))
+        return alt.value(palette[0])
+    return alt.Color(
+        "JobNumber:N",
+        scale=alt.Scale(range=palette),
+        legend=alt.Legend(labelLimit=0, labelFontSize=12),
+    )
 
 
 def render_comparison_chart(
@@ -150,7 +181,7 @@ def render_comparison_chart(
             y=alt.Y(f"{metric}:Q", axis=y_axis),
             color=alt.Color(
                 "Comparacion:N",
-                scale=alt.Scale(domain=["A", "B"], range=["#367a8c", "#d17a45"]),
+                scale=alt.Scale(domain=["A", "B"], range=chart_palette()[:2]),
                 legend=alt.Legend(title="Archivo"),
             ),
             tooltip=[
@@ -166,7 +197,7 @@ def render_comparison_chart(
 
 def render_cpu_chart(data, metric, title, chart_key, category_field, tooltip_title):
     chart_type = select_chart_type(chart_key)
-    chart_color = job_color(chart_type) if category_field == "JobNumber" else alt.value("#367a8c")
+    chart_color = job_color(chart_type) if category_field == "JobNumber" else alt.value(chart_palette()[0])
     chart = (
         apply_chart_mark(alt.Chart(data), chart_type)
         .encode(
@@ -193,7 +224,7 @@ def render_cpu_chart(data, metric, title, chart_key, category_field, tooltip_tit
 
 def render_duration_chart(data, metric, title, chart_key, category_field, tooltip_title):
     chart_type = select_chart_type(chart_key)
-    chart_color = job_color(chart_type) if category_field == "JobNumber" else alt.value("#367a8c")
+    chart_color = job_color(chart_type) if category_field == "JobNumber" else alt.value(chart_palette()[0])
     tooltip = [alt.Tooltip(f"{category_field}:N", title=category_field)]
     if category_field == "Registro":
         tooltip.append(alt.Tooltip("JobNumber:N", title="JobNumber"))
@@ -250,11 +281,11 @@ def render_peak_vs_threshold_time_chart(data, series_field=None, per_record=Fals
         tooltip.insert(1, alt.Tooltip(f"{series_field}:N", title="Archivo"))
         encodings["color"] = alt.Color(
             f"{series_field}:N",
-            scale=alt.Scale(domain=["A", "B"], range=["#367a8c", "#d17a45"]),
+            scale=alt.Scale(domain=["A", "B"], range=chart_palette()[:2]),
             legend=alt.Legend(title="Archivo"),
         )
     else:
-        encodings["color"] = alt.value("#367a8c")
+        encodings["color"] = alt.value(chart_palette()[0])
 
     chart = (
         alt.Chart(chart_data)
