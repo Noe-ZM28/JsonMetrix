@@ -1,17 +1,21 @@
 # JsonMetrix
 
-Dashboard local con Streamlit para analizar métricas de procesamiento LogExport y comparar dos archivos JSON.
+Dashboard local con Streamlit para analizar métricas LogExport desde archivos JSON y comparar dos archivos.
 
 ## Funcionalidades
 
-- Analizar uno o varios archivos JSON cargados desde el equipo.
-- Comparar dos archivos por `JobNumber`, con tablas paralelas para A y B y diferencias `B - A`.
-- Leer JSON estándar, JSON Lines y secuencias de objetos JSON concatenados.
-- Excluir eventos de inicio del logger y evitar contar de nuevo resúmenes cuando también hay registros detallados.
-- Agrupar métricas por trabajo: inicio y fin, duración transcurrida, duración acumulada en milisegundos, CPU media y pico, tamaño total y records.
-- Mostrar gráficas de duración, CPU, tamaño y records. En modo análisis, cada métrica permite cambiar por separado entre barras, línea, puntos y área.
-- Mostrar los tamaños automáticamente en KB, MB o GB.
-- Limpiar archivos y estado de la sesión con **Limpiar todo**.
+- Analizar uno o varios JSON cargados desde el equipo, agrupando resultados por `JobNumber`.
+- Comparar dos archivos con tablas A/B paralelas, diferencias `B - A` y gráficas de barras agrupadas.
+- Leer JSON estándar, JSON Lines y secuencias de objetos concatenados.
+- Ignorar eventos de inicio del logger y evitar duplicar los registros resumen cuando existen registros detallados.
+- Alternar entre métricas por registro individual y promedios por `JobNumber`.
+- Cambiar de forma independiente el tipo de gráfica entre barras, línea, puntos y área.
+- Visualizar el pico máximo de CPU frente al tiempo por encima del umbral configurado, tanto por registro como por trabajo.
+- Ajustar los colores al tema activo: paleta neón en modo oscuro y colores oscuros en modo claro.
+- Mostrar tamaños de archivo automáticamente en KB, MB o GB.
+- Limpiar los archivos cargados y el estado de sesión con **Limpiar todo**.
+
+Las fechas agregadas usan el inicio más temprano y el fin más tardío. El uso medio de CPU se pondera por la duración de los registros. El tiempo de la gráfica de CPU corresponde a `CpuTimeAboveThresholdMs` sobre `CpuThresholdPercent`; no es tiempo por encima del pico máximo.
 
 ## Requisitos
 
@@ -20,14 +24,14 @@ Dashboard local con Streamlit para analizar métricas de procesamiento LogExport
 
 ## Instalación
 
-Abre PowerShell en la carpeta del proyecto y ejecuta:
+En PowerShell, desde la carpeta del proyecto:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install streamlit pandas altair
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Si ya tienes el entorno `.venv`, puedes omitir su creación.
+El archivo `.gitignore` excluye el entorno virtual y los archivos de caché de Python.
 
 ## Ejecución
 
@@ -35,55 +39,8 @@ Si ya tienes el entorno `.venv`, puedes omitir su creación.
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Abre la URL local que indique Streamlit, normalmente [http://localhost:8501](http://localhost:8501).
-
-## Formato de los datos
-
-Para las métricas por trabajo, los registros deben incluir `JobNumber`, `CpuAveragePercent` y `Records`. También se reconocen `DurationMs`, `CpuPeakPercent`, `InputBytes` y las fechas `ProcessingStartUtc` / `ProcessingEndUtc` o `ProcessingStartLocal` / `ProcessingEndLocal`.
-
-Aplicación local con Streamlit para comparar métricas de procesamiento a partir de uno o varios archivos JSON de LogExport.
-
-## Funcionalidades
-
-- Seleccionar archivos JSON disponibles dentro del proyecto o cargar varios archivos desde el equipo.
-- Leer JSON estándar, JSON Lines y secuencias de objetos JSON concatenados.
-- Ignorar eventos de inicio del logger (`"@mt": "Metrics logger started"`).
-- Agrupar registros por `JobNumber` y calcular:
-	- Inicio más temprano y final más tardío.
-	- Duración total en segundos.
-	- Uso medio de CPU, presentado como porcentaje con dos decimales.
-	- Total de records y cantidad de registros analizados.
-- Comparar duración, uso de CPU y records mediante gráficas de barras.
-- Limpiar los archivos seleccionados y cargados con el botón **Limpiar todo**.
-
-## Requisitos
-
-- Windows
-- Python 3.9 o posterior
-- Dependencias: Streamlit, pandas y Altair
-
-## Instalación
-
-Desde PowerShell, en la carpeta del proyecto:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install streamlit pandas altair
-```
-
-Si ya existe el entorno `.venv`, no es necesario crearlo nuevamente.
-
-## Ejecución
-
-Con `app.py` en la raíz del proyecto, inicia la aplicación con:
-
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py
-```
-
-Streamlit mostrará la dirección local en la terminal; normalmente es [http://localhost:8501](http://localhost:8501).
+Abre la dirección que indique Streamlit, normalmente [http://localhost:8501](http://localhost:8501).
 
 ## Datos esperados
 
-Los registros de métricas deben incluir `JobNumber`, `CpuAveragePercent` y `Records`, además de fechas de inicio y fin en `ProcessingStartUtc` / `ProcessingEndUtc` o `ProcessingStartLocal` / `ProcessingEndLocal`. Los valores se agregan entre los registros válidos de cada trabajo. Los archivos JSON pueden seleccionarse desde el proyecto o cargarse desde el navegador.
-"# JsonMetrix" 
+Los registros deben incluir `JobNumber`, `CpuAveragePercent` y `Records`. También se reconocen `DurationMs`, `CpuPeakPercent`, `CpuTimeAboveThresholdMs`, `CpuThresholdPercent`, `InputBytes` y las fechas `ProcessingStartUtc` / `ProcessingEndUtc` o `ProcessingStartLocal` / `ProcessingEndLocal`.
