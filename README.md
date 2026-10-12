@@ -24,15 +24,22 @@ Abre PowerShell en la carpeta del proyecto y ejecuta:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install streamlit pandas altair
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Si ya tienes el entorno `.venv`, puedes omitir su creación.
 
+Para activarlo en PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+. .\.venv\Scripts\Activate.ps1
+```
+
 ## Ejecución
 
 ```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py
+streamlit run app.py
 ```
 
 Abre la URL local que indique Streamlit, normalmente [http://localhost:8501](http://localhost:8501).
@@ -68,17 +75,24 @@ Desde PowerShell, en la carpeta del proyecto:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install streamlit pandas altair
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Si ya existe el entorno `.venv`, no es necesario crearlo nuevamente.
+
+Para activarlo en PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+. .\.venv\Scripts\Activate.ps1
+```
 
 ## Ejecución
 
 Con `app.py` en la raíz del proyecto, inicia la aplicación con:
 
 ```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py
+streamlit run app.py
 ```
 
 Streamlit mostrará la dirección local en la terminal; normalmente es [http://localhost:8501](http://localhost:8501).
