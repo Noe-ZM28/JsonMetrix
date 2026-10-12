@@ -122,7 +122,15 @@ def job_color(chart_type):
     return alt.Color("JobNumber:N", legend=alt.Legend(labelLimit=0, labelFontSize=12))
 
 
-def render_comparison_chart(data, metric, title, tooltip_format=None, axis_format=None, axis_label_expr=None):
+def render_comparison_chart(
+    data,
+    metric,
+    title,
+    tooltip_format=None,
+    axis_format=None,
+    axis_label_expr=None,
+    category_field="JobNumber",
+):
     y_axis = alt.Axis(title=title)
     if axis_format:
         y_axis.format = axis_format
@@ -134,7 +142,7 @@ def render_comparison_chart(data, metric, title, tooltip_format=None, axis_forma
         .mark_bar()
         .encode(
             x=alt.X(
-                "JobNumber:N",
+                f"{category_field}:N",
                 sort="-y",
                 axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
             ),
@@ -146,10 +154,61 @@ def render_comparison_chart(data, metric, title, tooltip_format=None, axis_forma
                 legend=alt.Legend(title="Archivo"),
             ),
             tooltip=[
-                "JobNumber:N",
+                alt.Tooltip(f"{category_field}:N", title=category_field),
                 alt.Tooltip("Comparacion:N", title="Archivo"),
                 alt.Tooltip(f"{metric}:Q", title=title, format=tooltip_format),
             ],
+        )
+        .properties(height=350)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def render_cpu_chart(data, metric, title, chart_key, category_field, tooltip_title):
+    chart_type = select_chart_type(chart_key)
+    chart_color = job_color(chart_type) if category_field == "JobNumber" else alt.value("#367a8c")
+    chart = (
+        apply_chart_mark(alt.Chart(data), chart_type)
+        .encode(
+            x=alt.X(
+                f"{category_field}:N",
+                sort="-y",
+                axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
+            ),
+            y=alt.Y(
+                f"{metric}:Q",
+                title=title,
+                axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
+            ),
+            color=chart_color,
+            tooltip=[
+                alt.Tooltip(f"{category_field}:N", title=category_field),
+                alt.Tooltip(f"{metric}:Q", title=tooltip_title, format=".2f"),
+            ],
+        )
+        .properties(height=350)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def render_duration_chart(data, metric, title, chart_key, category_field, tooltip_title):
+    chart_type = select_chart_type(chart_key)
+    chart_color = job_color(chart_type) if category_field == "JobNumber" else alt.value("#367a8c")
+    tooltip = [alt.Tooltip(f"{category_field}:N", title=category_field)]
+    if category_field == "Registro":
+        tooltip.append(alt.Tooltip("JobNumber:N", title="JobNumber"))
+    tooltip.append(alt.Tooltip(f"{metric}:Q", title=tooltip_title, format=",.2f"))
+    chart = (
+        apply_chart_mark(alt.Chart(data), chart_type)
+        .encode(
+            x=alt.X(
+                f"{category_field}:N",
+                sort="-y",
+                axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
+            ),
+            y=alt.Y(f"{metric}:Q", title=title),
+            color=chart_color,
+            tooltip=tooltip,
         )
         .properties(height=350)
     )
@@ -196,6 +255,10 @@ def build_metrics_by_job(file_sources):
                     rows.append(
                         {
                             "Archivo": file_name,
+                            "Registro": (
+                                f"{file_name} · {record.get('File') or record.get('WorkItemId') or 'Registro'}"
+                                f" · {len(rows) + 1}"
+                            ),
                             "JobNumber": job_number,
                             "CpuAveragePercent": cpu,
                             "DurationMs": duration_ms,
@@ -226,7 +289,7 @@ def build_metrics_by_job(file_sources):
         df = df.dropna(subset=["CpuAveragePercent", "Records"]).reset_index(drop=True)
 
     if df.empty:
-        return df, errors
+        return df, errors, df
 
     has_details = df.groupby("JobNumber")["EsResumen"].transform(lambda values: (~values).any())
     df = df.loc[~df["EsResumen"] | ~has_details].reset_index(drop=True)
@@ -236,16 +299,26 @@ def build_metrics_by_job(file_sources):
     df = df.dropna(subset=["Inicio_ts", "Fin_ts"]).reset_index(drop=True)
 
     if df.empty:
-        return df, errors
+        return df, errors, df
 
+    df["DuracionRegistroSegundos"] = (df["Fin_ts"] - df["Inicio_ts"]).dt.total_seconds()
+    records_df = df.copy()
+    df["DuracionCPUPonderadaMs"] = df["DurationMs"].where(
+        df["DurationMs"].gt(0) & df["CpuAveragePercent"].notna(),
+        0,
+    )
+    df["CPUPonderada"] = df["CpuAveragePercent"].fillna(0) * df["DuracionCPUPonderadaMs"]
     grouped = (
         df.groupby("JobNumber", as_index=False)
         .agg(
             Inicio=("Inicio_ts", "min"),
             Fin=("Fin_ts", "max"),
             MediaUsoCPU=("CpuAveragePercent", "mean"),
-            DuracionTotalMs=("DurationMs", "sum"),
-            PicoUsoCPU=("CpuPeakPercent", "max"),
+            CPUPonderada=("CPUPonderada", "sum"),
+            DuracionCPUPonderadaMs=("DuracionCPUPonderadaMs", "sum"),
+            DuracionPromedioMs=("DurationMs", "mean"),
+            DuracionPromedioSegundos=("DuracionRegistroSegundos", "mean"),
+            PicoUsoCPU=("CpuPeakPercent", "mean"),
             TotalInputBytes=("InputBytes", "sum"),
             TotalRecords=("Records", "sum"),
             RegistrosAnalizados=("Records", "count"),
@@ -256,10 +329,16 @@ def build_metrics_by_job(file_sources):
         .reset_index(drop=True)
     )
 
-    grouped["DuracionSegundos"] = (grouped["Fin"] - grouped["Inicio"]).dt.total_seconds()
-    grouped["DuracionMinutos"] = (grouped["DuracionSegundos"] / 60).round(2)
+    cpu_con_duracion = grouped["DuracionCPUPonderadaMs"] > 0
+    grouped.loc[cpu_con_duracion, "MediaUsoCPU"] = (
+        grouped.loc[cpu_con_duracion, "CPUPonderada"]
+        / grouped.loc[cpu_con_duracion, "DuracionCPUPonderadaMs"]
+    )
+    grouped = grouped.drop(columns=["CPUPonderada", "DuracionCPUPonderadaMs"])
+    grouped["DuracionTranscurridaMs"] = (grouped["Fin"] - grouped["Inicio"]).dt.total_seconds() * 1000
+    grouped["DuracionMinutos"] = ((grouped["Fin"] - grouped["Inicio"]).dt.total_seconds() / 60).round(2)
     grouped["TamanoTotal"] = grouped["TotalInputBytes"].map(format_file_size)
-    return grouped, errors
+    return grouped, errors, records_df
 
 
 st.set_page_config(page_title="JsonMetrix", page_icon="📊", layout="wide")
@@ -333,8 +412,8 @@ if app_mode == "Comparar 2 archivos":
 
     comparison_ready = comparison_file_a is not None and comparison_file_b is not None
     if comparison_ready:
-        metrics_a, errors_a = build_metrics_by_job([comparison_file_a])
-        metrics_b, errors_b = build_metrics_by_job([comparison_file_b])
+        metrics_a, errors_a, records_a = build_metrics_by_job([comparison_file_a])
+        metrics_b, errors_b, records_b = build_metrics_by_job([comparison_file_b])
         for error in errors_a + errors_b:
             st.warning(f"No se pudo procesar un archivo: {error}")
 
@@ -346,7 +425,8 @@ if app_mode == "Comparar 2 archivos":
                 "Inicio",
                 "Fin",
                 "MediaUsoCPU",
-                "DuracionTotalMs",
+                "DuracionTranscurridaMs",
+                "DuracionPromedioMs",
                 "PicoUsoCPU",
                 "TamanoTotal",
                 "TotalInputBytes",
@@ -362,8 +442,9 @@ if app_mode == "Comparar 2 archivos":
 
             delta_fields = [
                 ("MediaUsoCPU", "Diferencia CPU (%)"),
-                ("DuracionTotalMs", "Diferencia duración (ms)"),
-                ("PicoUsoCPU", "Diferencia pico CPU (%)"),
+                ("DuracionTranscurridaMs", "Diferencia duración transcurrida (ms)"),
+                ("DuracionPromedioMs", "Diferencia duración promedio (ms)"),
+                ("PicoUsoCPU", "Diferencia pico promedio CPU (%)"),
                 ("TotalInputBytes", "Diferencia tamaño (bytes)"),
                 ("TotalRecords", "Diferencia records"),
             ]
@@ -375,18 +456,21 @@ if app_mode == "Comparar 2 archivos":
                 "Inicio",
                 "Fin",
                 "MediaUsoCPU",
-                "DuracionTotalMs",
+                "DuracionTranscurridaMs",
+                "DuracionPromedioMs",
                 "PicoUsoCPU",
                 "TamanoTotal",
                 "TotalRecords",
             ]
             display_config = {
-                "MediaUsoCPU A": st.column_config.NumberColumn("CPU media", format="%.2f%%"),
-                "MediaUsoCPU B": st.column_config.NumberColumn("CPU media", format="%.2f%%"),
-                "PicoUsoCPU A": st.column_config.NumberColumn("Pico CPU", format="%.2f%%"),
-                "PicoUsoCPU B": st.column_config.NumberColumn("Pico CPU", format="%.2f%%"),
-                "DuracionTotalMs A": st.column_config.NumberColumn("Duración (ms)", format="%.0f"),
-                "DuracionTotalMs B": st.column_config.NumberColumn("Duración (ms)", format="%.0f"),
+                "MediaUsoCPU A": st.column_config.NumberColumn("CPU media ponderada", format="%.2f%%"),
+                "MediaUsoCPU B": st.column_config.NumberColumn("CPU media ponderada", format="%.2f%%"),
+                "PicoUsoCPU A": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
+                "PicoUsoCPU B": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
+                "DuracionTranscurridaMs A": st.column_config.NumberColumn("Duración transcurrida (ms)", format="%.0f"),
+                "DuracionTranscurridaMs B": st.column_config.NumberColumn("Duración transcurrida (ms)", format="%.0f"),
+                "DuracionPromedioMs A": st.column_config.NumberColumn("Duración promedio (ms)", format="%.2f"),
+                "DuracionPromedioMs B": st.column_config.NumberColumn("Duración promedio (ms)", format="%.2f"),
                 "TotalRecords A": st.column_config.NumberColumn("Records", format="%.0f"),
                 "TotalRecords B": st.column_config.NumberColumn("Records", format="%.0f"),
             }
@@ -416,8 +500,15 @@ if app_mode == "Comparar 2 archivos":
                 comparison_df[difference_columns],
                 column_config={
                     "Diferencia CPU (%)": st.column_config.NumberColumn("CPU (%)", format="%.2f"),
-                    "Diferencia duración (ms)": st.column_config.NumberColumn("Duración (ms)", format="%.0f"),
-                    "Diferencia pico CPU (%)": st.column_config.NumberColumn("Pico CPU (%)", format="%.2f"),
+                    "Diferencia duración transcurrida (ms)": st.column_config.NumberColumn(
+                        "Duración transcurrida (ms)", format="%.0f"
+                    ),
+                    "Diferencia duración promedio (ms)": st.column_config.NumberColumn(
+                        "Duración promedio (ms)", format="%.2f"
+                    ),
+                    "Diferencia pico promedio CPU (%)": st.column_config.NumberColumn(
+                        "Pico promedio CPU (%)", format="%.2f"
+                    ),
                     "Diferencia tamaño (bytes)": st.column_config.NumberColumn("Tamaño (bytes)", format="%.0f"),
                     "Diferencia records": st.column_config.NumberColumn("Records", format="%.0f"),
                 },
@@ -432,30 +523,72 @@ if app_mode == "Comparar 2 archivos":
                 ],
                 ignore_index=True,
             )
+            comparison_record_data = pd.concat(
+                [
+                    records_a.assign(Comparacion="A"),
+                    records_b.assign(Comparacion="B"),
+                ],
+                ignore_index=True,
+            )
             st.subheader("Gráficas comparativas")
-            render_comparison_chart(
-                comparison_chart_data,
-                "DuracionTotalMs",
-                "Duración acumulada (ms)",
-                tooltip_format=",.0f",
-                axis_format=",.0f",
+            chart_view = st.radio(
+                "Ver gráficas",
+                ["Por registro", "Por promedio"],
+                horizontal=True,
+                index=1,
+                key="comparison_chart_view",
             )
-            render_comparison_chart(
-                comparison_chart_data,
-                "MediaUsoCPU",
-                "CPU media (%)",
-                tooltip_format=".2f",
-                axis_format=".2f",
-                axis_label_expr="format(datum.value, '.2f') + '%'",
-            )
-            render_comparison_chart(
-                comparison_chart_data.dropna(subset=["PicoUsoCPU"]),
-                "PicoUsoCPU",
-                "Pico de CPU (%)",
-                tooltip_format=".2f",
-                axis_format=".2f",
-                axis_label_expr="format(datum.value, '.2f') + '%'",
-            )
+            if chart_view == "Por registro":
+                render_comparison_chart(
+                    comparison_record_data.dropna(subset=["DurationMs"]),
+                    "DurationMs",
+                    "Duración por registro individual (ms)",
+                    tooltip_format=",.2f",
+                    axis_format=",.2f",
+                    category_field="Registro",
+                )
+                render_comparison_chart(
+                    comparison_record_data.dropna(subset=["CpuAveragePercent"]),
+                    "CpuAveragePercent",
+                    "CPU promedio por registro (%)",
+                    tooltip_format=".2f",
+                    axis_format=".2f",
+                    axis_label_expr="format(datum.value, '.2f') + '%' ",
+                    category_field="Registro",
+                )
+                render_comparison_chart(
+                    comparison_record_data.dropna(subset=["CpuPeakPercent"]),
+                    "CpuPeakPercent",
+                    "Pico de CPU por registro (%)",
+                    tooltip_format=".2f",
+                    axis_format=".2f",
+                    axis_label_expr="format(datum.value, '.2f') + '%' ",
+                    category_field="Registro",
+                )
+            else:
+                render_comparison_chart(
+                    comparison_chart_data,
+                    "DuracionPromedioMs",
+                    "Duración promedio por JobNumber (ms)",
+                    tooltip_format=",.2f",
+                    axis_format=",.2f",
+                )
+                render_comparison_chart(
+                    comparison_chart_data,
+                    "MediaUsoCPU",
+                    "CPU promedio ponderado (%)",
+                    tooltip_format=".2f",
+                    axis_format=".2f",
+                    axis_label_expr="format(datum.value, '.2f') + '%' ",
+                )
+                render_comparison_chart(
+                    comparison_chart_data.dropna(subset=["PicoUsoCPU"]),
+                    "PicoUsoCPU",
+                    "Pico promedio de CPU (%)",
+                    tooltip_format=".2f",
+                    axis_format=".2f",
+                    axis_label_expr="format(datum.value, '.2f') + '%' ",
+                )
             render_comparison_chart(
                 comparison_chart_data,
                 "TotalInputBytes",
@@ -488,7 +621,7 @@ else:
 st.session_state["file_sources"] = file_sources
 
 if app_mode == "Analizar archivos" and file_sources:
-    metrics_df, errors = build_metrics_by_job(file_sources)
+    metrics_df, errors, records_df = build_metrics_by_job(file_sources)
 
     if errors:
         st.warning("Algunos archivos no pudieron procesarse:")
@@ -504,90 +637,38 @@ if app_mode == "Analizar archivos" and file_sources:
         st.dataframe(
             metrics_df,
             column_config={
-                "MediaUsoCPU": st.column_config.NumberColumn("MediaUsoCPU", format="%.2f%%"),
-                "PicoUsoCPU": st.column_config.NumberColumn("PicoUsoCPU", format="%.2f%%"),
+                "MediaUsoCPU": st.column_config.NumberColumn("CPU media ponderada", format="%.2f%%"),
+                "PicoUsoCPU": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
+                "DuracionTranscurridaMs": st.column_config.NumberColumn(
+                    "Duración transcurrida (ms)", format="%.0f"
+                ),
+                "DuracionPromedioMs": st.column_config.NumberColumn("Duración promedio (ms)", format="%.2f"),
             },
             use_container_width=True,
         )
 
-        st.subheader("Duración por JobNumber (segundos)")
-        duration_chart_type = select_chart_type("chart_type_duration")
-        duration_chart = (
-            apply_chart_mark(alt.Chart(metrics_df), duration_chart_type)
-            .encode(
-                x=alt.X(
-                    "JobNumber:N",
-                    sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
-                ),
-                y=alt.Y(
-                    "DuracionSegundos:Q",
-                    title="Duración (segundos)",
-                    axis=alt.Axis(format=".2f"),
-                ),
-                color=job_color(duration_chart_type),
-                tooltip=[
-                    "JobNumber:N",
-                    alt.Tooltip("DuracionSegundos:Q", format=".2f"),
-                    alt.Tooltip("Inicio:T", title="Inicio", format="%Y-%m-%d %H:%M:%S.%L"),
-                    alt.Tooltip("Fin:T", title="Fin", format="%Y-%m-%d %H:%M:%S.%L"),
-                ],
-            )
-            .properties(height=350)
+        chart_view = st.radio(
+            "Ver gráficas",
+            ["Por registro", "Por promedio"],
+            horizontal=True,
+            index=1,
+            key="analysis_chart_view",
         )
-        st.altair_chart(duration_chart, use_container_width=True)
-
-        st.subheader("Duración acumulada por JobNumber (ms)")
-        duration_ms_chart_type = select_chart_type("chart_type_duration_ms")
-        duration_ms_chart = (
-            apply_chart_mark(alt.Chart(metrics_df), duration_ms_chart_type)
-            .encode(
-                x=alt.X(
-                    "JobNumber:N",
-                    sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
-                ),
-                y=alt.Y("DuracionTotalMs:Q", title="Duración acumulada (ms)"),
-                color=job_color(duration_ms_chart_type),
-                tooltip=["JobNumber:N", alt.Tooltip("DuracionTotalMs:Q", format=",.0f")],
+        if chart_view == "Por registro":
+            st.subheader("Duración por registro individual (ms)")
+            render_duration_chart(
+                records_df.dropna(subset=["DurationMs"]),
+                "DurationMs",
+                "Duración del registro (ms)",
+                "chart_type_duration_record",
+                "Registro",
+                "Duración del registro",
             )
-            .properties(height=350)
-        )
-        st.altair_chart(duration_ms_chart, use_container_width=True)
-
-        st.subheader("CPU promedio por JobNumber")
-        cpu_chart_type = select_chart_type("chart_type_cpu_average")
-        cpu_chart = (
-            apply_chart_mark(alt.Chart(metrics_df), cpu_chart_type)
-            .transform_calculate(MediaUsoCPUFormato="format(datum.MediaUsoCPU, '.2f') + '%' ")
-            .encode(
-                x=alt.X(
-                    "JobNumber:N",
-                    sort="-y",
-                    axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
-                ),
-                y=alt.Y(
-                    "MediaUsoCPU:Q",
-                    axis=alt.Axis(labelExpr="format(datum.value, '.2f') + '%'"),
-                ),
-                color=job_color(cpu_chart_type),
-                tooltip=[
-                    "JobNumber:N",
-                    alt.Tooltip("MediaUsoCPUFormato:N", title="CPU promedio"),
-                ],
-            )
-            .properties(height=350)
-        )
-        st.altair_chart(cpu_chart, use_container_width=True)
-
-        st.subheader("Pico de uso de CPU (CpuPeakPercent) por JobNumber")
-        cpu_peak_data = metrics_df.dropna(subset=["PicoUsoCPU"])
-        if cpu_peak_data.empty:
-            st.info("Los archivos seleccionados no contienen valores válidos de CpuPeakPercent.")
         else:
-            cpu_peak_chart_type = select_chart_type("chart_type_cpu_peak")
-            cpu_peak_chart = (
-                apply_chart_mark(alt.Chart(cpu_peak_data), cpu_peak_chart_type)
+            st.subheader("Duración promedio por registro y JobNumber (segundos)")
+            duration_chart_type = select_chart_type("chart_type_duration")
+            duration_chart = (
+                apply_chart_mark(alt.Chart(metrics_df), duration_chart_type)
                 .encode(
                     x=alt.X(
                         "JobNumber:N",
@@ -595,16 +676,77 @@ if app_mode == "Analizar archivos" and file_sources:
                         axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
                     ),
                     y=alt.Y(
-                        "PicoUsoCPU:Q",
-                        title="Pico de uso de CPU (%)",
-                        axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
+                        "DuracionPromedioSegundos:Q",
+                        title="Duración promedio (segundos)",
+                        axis=alt.Axis(format=".2f"),
                     ),
-                    color=job_color(cpu_peak_chart_type),
-                    tooltip=["JobNumber:N", alt.Tooltip("PicoUsoCPU:Q", title="CpuPeakPercent", format=".2f")],
+                    color=job_color(duration_chart_type),
+                    tooltip=[
+                        "JobNumber:N",
+                        alt.Tooltip("DuracionPromedioSegundos:Q", title="Duración promedio (s)", format=".2f"),
+                        alt.Tooltip("Inicio:T", title="Inicio", format="%Y-%m-%d %H:%M:%S.%L"),
+                        alt.Tooltip("Fin:T", title="Fin", format="%Y-%m-%d %H:%M:%S.%L"),
+                    ],
                 )
                 .properties(height=350)
             )
-            st.altair_chart(cpu_peak_chart, use_container_width=True)
+            st.altair_chart(duration_chart, use_container_width=True)
+
+            st.subheader("Duración promedio por JobNumber (ms)")
+            render_duration_chart(
+                metrics_df,
+                "DuracionPromedioMs",
+                "Duración promedio (ms)",
+                "chart_type_duration_ms",
+                "JobNumber",
+                "Duración promedio por JobNumber",
+            )
+
+        st.subheader("Uso de CPU")
+        if chart_view == "Por registro":
+            render_cpu_chart(
+                records_df.dropna(subset=["CpuAveragePercent"]),
+                "CpuAveragePercent",
+                "CPU promedio (%)",
+                "chart_type_cpu_average_record",
+                "Registro",
+                "CPU promedio del registro",
+            )
+        else:
+            render_cpu_chart(
+                metrics_df,
+                "MediaUsoCPU",
+                "CPU promedio ponderado (%)",
+                "chart_type_cpu_average_job",
+                "JobNumber",
+                "CPU promedio ponderado",
+            )
+
+        st.subheader("Picos de uso de CPU")
+        record_cpu_peak_data = records_df.dropna(subset=["CpuPeakPercent"])
+        job_cpu_peak_data = metrics_df.dropna(subset=["PicoUsoCPU"])
+        cpu_peak_data = record_cpu_peak_data if chart_view == "Por registro" else job_cpu_peak_data
+        if cpu_peak_data.empty:
+            st.info("Los archivos seleccionados no contienen valores válidos de CpuPeakPercent.")
+        else:
+            if chart_view == "Por registro":
+                render_cpu_chart(
+                    record_cpu_peak_data,
+                    "CpuPeakPercent",
+                    "Pico de CPU (%)",
+                    "chart_type_cpu_peak_record",
+                    "Registro",
+                    "Pico de CPU del registro",
+                )
+            else:
+                render_cpu_chart(
+                    job_cpu_peak_data,
+                    "PicoUsoCPU",
+                    "Pico promedio de CPU (%)",
+                    "chart_type_cpu_peak_job",
+                    "JobNumber",
+                    "Pico promedio CPU",
+                )
 
         st.subheader("Tamaño total de archivos por JobNumber")
         input_size_chart_type = select_chart_type("chart_type_input_size")
@@ -661,7 +803,8 @@ if app_mode == "Analizar archivos" and file_sources:
                     "Fin",
                     "RegistrosAnalizados",
                     "MediaUsoCPU",
-                    "DuracionTotalMs",
+                    "DuracionTranscurridaMs",
+                    "DuracionPromedioMs",
                     "PicoUsoCPU",
                     "TamanoTotal",
                     "TotalRecords",
@@ -670,8 +813,12 @@ if app_mode == "Analizar archivos" and file_sources:
                 ]
             ],
             column_config={
-                "MediaUsoCPU": st.column_config.NumberColumn("MediaUsoCPU", format="%.2f%%"),
-                "PicoUsoCPU": st.column_config.NumberColumn("PicoUsoCPU", format="%.2f%%"),
+                "MediaUsoCPU": st.column_config.NumberColumn("CPU media ponderada", format="%.2f%%"),
+                "PicoUsoCPU": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
+                "DuracionTranscurridaMs": st.column_config.NumberColumn(
+                    "Duración transcurrida (ms)", format="%.0f"
+                ),
+                "DuracionPromedioMs": st.column_config.NumberColumn("Duración promedio (ms)", format="%.2f"),
             },
             use_container_width=True,
         )
