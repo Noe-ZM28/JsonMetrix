@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 
 import altair as alt
@@ -116,6 +117,23 @@ def apply_chart_mark(chart, chart_type):
     return chart.mark_bar()
 
 
+def next_ten_max(data, field):
+    values = pd.to_numeric(data[field], errors="coerce").dropna()
+    if values.empty:
+        return 10
+    return max(10, math.ceil(float(values.max()) / 10) * 10)
+
+
+def category_axis(field):
+    is_record = field == "Registro"
+    return alt.Axis(
+        labelLimit=0,
+        labelAngle=-90 if is_record else -45,
+        labelFontSize=9 if is_record else 12,
+        labelOverlap=False if is_record else True,
+    )
+
+
 def chart_palette():
     active_theme = st.context.theme or {}
     theme_base = active_theme.get("type") or st.get_option("theme.base")
@@ -175,10 +193,14 @@ def render_comparison_chart(
             x=alt.X(
                 f"{category_field}:N",
                 sort="-y",
-                axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
+                axis=category_axis(category_field),
             ),
             xOffset=alt.XOffset("Comparacion:N"),
-            y=alt.Y(f"{metric}:Q", axis=y_axis),
+            y=alt.Y(
+                f"{metric}:Q",
+                axis=y_axis,
+                scale=alt.Scale(domainMax=next_ten_max(data, metric)),
+            ),
             color=alt.Color(
                 "Comparacion:N",
                 scale=alt.Scale(domain=["A", "B"], range=chart_palette()[:2]),
@@ -190,7 +212,7 @@ def render_comparison_chart(
                 alt.Tooltip(f"{metric}:Q", title=title, format=tooltip_format),
             ],
         )
-        .properties(height=350)
+        .properties(height=500 if category_field == "Registro" else 350)
     )
     st.altair_chart(chart, use_container_width=True)
 
@@ -204,12 +226,13 @@ def render_cpu_chart(data, metric, title, chart_key, category_field, tooltip_tit
             x=alt.X(
                 f"{category_field}:N",
                 sort="-y",
-                axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
+                axis=category_axis(category_field),
             ),
             y=alt.Y(
                 f"{metric}:Q",
                 title=title,
                 axis=alt.Axis(format=".2f", labelExpr="format(datum.value, '.2f') + '%'"),
+                scale=alt.Scale(domainMax=next_ten_max(data, metric)),
             ),
             color=chart_color,
             tooltip=[
@@ -217,7 +240,7 @@ def render_cpu_chart(data, metric, title, chart_key, category_field, tooltip_tit
                 alt.Tooltip(f"{metric}:Q", title=tooltip_title, format=".2f"),
             ],
         )
-        .properties(height=350)
+        .properties(height=500 if category_field == "Registro" else 350)
     )
     st.altair_chart(chart, use_container_width=True)
 
@@ -235,13 +258,17 @@ def render_duration_chart(data, metric, title, chart_key, category_field, toolti
             x=alt.X(
                 f"{category_field}:N",
                 sort="-y",
-                axis=alt.Axis(labelLimit=0, labelAngle=-45, labelFontSize=12),
+                axis=category_axis(category_field),
             ),
-            y=alt.Y(f"{metric}:Q", title=title),
+            y=alt.Y(
+                f"{metric}:Q",
+                title=title,
+                scale=alt.Scale(domainMax=next_ten_max(data, metric)),
+            ),
             color=chart_color,
             tooltip=tooltip,
         )
-        .properties(height=350)
+        .properties(height=500 if category_field == "Registro" else 350)
     )
     st.altair_chart(chart, use_container_width=True)
 
@@ -274,7 +301,11 @@ def render_peak_vs_threshold_time_chart(data, series_field=None, per_record=Fals
             title="Pico máximo de CPU (%)",
             axis=alt.Axis(labelExpr="format(datum.value, '.2f') + '%'"),
         ),
-        "y": alt.Y("TiempoSobreUmbralMs:Q", title="Tiempo sobre umbral (ms)"),
+        "y": alt.Y(
+            "TiempoSobreUmbralMs:Q",
+            title="Tiempo sobre umbral (ms)",
+            scale=alt.Scale(domainMax=next_ten_max(chart_data, "TiempoSobreUmbralMs")),
+        ),
         "tooltip": tooltip,
     }
     if series_field:
