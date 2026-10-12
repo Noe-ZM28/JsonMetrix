@@ -215,6 +215,56 @@ def render_duration_chart(data, metric, title, chart_key, category_field, toolti
     st.altair_chart(chart, use_container_width=True)
 
 
+def render_peak_vs_threshold_time_chart(data, series_field=None, per_record=False):
+    if per_record:
+        data = data.rename(
+            columns={
+                "CpuPeakPercent": "PicoMaximoCPU",
+                "CpuTimeAboveThresholdMs": "TiempoSobreUmbralMs",
+                "CpuThresholdPercent": "UmbralCPUPercent",
+            }
+        )
+    chart_data = data.dropna(subset=["PicoMaximoCPU", "TiempoSobreUmbralMs"])
+    if chart_data.empty:
+        st.info("Los archivos no contienen valores de pico máximo y tiempo sobre umbral.")
+        return
+
+    tooltip = [
+        alt.Tooltip("JobNumber:N", title="JobNumber"),
+        alt.Tooltip("PicoMaximoCPU:Q", title="Pico máximo CPU (%)", format=".2f"),
+        alt.Tooltip("UmbralCPUPercent:Q", title="Umbral CPU (%)", format=".2f"),
+        alt.Tooltip("TiempoSobreUmbralMs:Q", title="Tiempo sobre umbral (ms)", format=",.0f"),
+    ]
+    if per_record and "Registro" in chart_data.columns:
+        tooltip.insert(1, alt.Tooltip("Registro:N", title="Registro"))
+    encodings = {
+        "x": alt.X(
+            "PicoMaximoCPU:Q",
+            title="Pico máximo de CPU (%)",
+            axis=alt.Axis(labelExpr="format(datum.value, '.2f') + '%'"),
+        ),
+        "y": alt.Y("TiempoSobreUmbralMs:Q", title="Tiempo sobre umbral (ms)"),
+        "tooltip": tooltip,
+    }
+    if series_field:
+        tooltip.insert(1, alt.Tooltip(f"{series_field}:N", title="Archivo"))
+        encodings["color"] = alt.Color(
+            f"{series_field}:N",
+            scale=alt.Scale(domain=["A", "B"], range=["#367a8c", "#d17a45"]),
+            legend=alt.Legend(title="Archivo"),
+        )
+    else:
+        encodings["color"] = alt.value("#367a8c")
+
+    chart = (
+        alt.Chart(chart_data)
+        .mark_circle(size=110, filled=True)
+        .encode(**encodings)
+        .properties(height=350)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
 def build_metrics_by_job(file_sources):
     rows = []
     errors = []
@@ -241,6 +291,8 @@ def build_metrics_by_job(file_sources):
                 cpu = record.get("CpuAveragePercent")
                 duration_ms = record.get("DurationMs")
                 cpu_peak = record.get("CpuPeakPercent")
+                cpu_time_above_threshold_ms = record.get("CpuTimeAboveThresholdMs")
+                cpu_threshold_percent = record.get("CpuThresholdPercent")
                 input_bytes = record.get("InputBytes")
                 records_count = record.get("Records")
                 start = record.get("ProcessingStartUtc") or record.get("ProcessingStartLocal")
@@ -263,6 +315,8 @@ def build_metrics_by_job(file_sources):
                             "CpuAveragePercent": cpu,
                             "DurationMs": duration_ms,
                             "CpuPeakPercent": cpu_peak,
+                            "CpuTimeAboveThresholdMs": cpu_time_above_threshold_ms,
+                            "CpuThresholdPercent": cpu_threshold_percent,
                             "InputBytes": input_bytes,
                             "Records": records_count,
                             "Site": record.get("Site", "N/A"),
@@ -281,6 +335,8 @@ def build_metrics_by_job(file_sources):
             "CpuAveragePercent",
             "DurationMs",
             "CpuPeakPercent",
+            "CpuTimeAboveThresholdMs",
+            "CpuThresholdPercent",
             "InputBytes",
             "Records",
         ]
@@ -319,6 +375,9 @@ def build_metrics_by_job(file_sources):
             DuracionPromedioMs=("DurationMs", "mean"),
             DuracionPromedioSegundos=("DuracionRegistroSegundos", "mean"),
             PicoUsoCPU=("CpuPeakPercent", "mean"),
+            PicoMaximoCPU=("CpuPeakPercent", "max"),
+            TiempoSobreUmbralMs=("CpuTimeAboveThresholdMs", lambda values: values.sum(min_count=1)),
+            UmbralCPUPercent=("CpuThresholdPercent", "max"),
             TotalInputBytes=("InputBytes", "sum"),
             TotalRecords=("Records", "sum"),
             RegistrosAnalizados=("Records", "count"),
@@ -428,6 +487,9 @@ if app_mode == "Comparar 2 archivos":
                 "DuracionTranscurridaMs",
                 "DuracionPromedioMs",
                 "PicoUsoCPU",
+                "PicoMaximoCPU",
+                "TiempoSobreUmbralMs",
+                "UmbralCPUPercent",
                 "TamanoTotal",
                 "TotalInputBytes",
                 "TotalRecords",
@@ -445,6 +507,8 @@ if app_mode == "Comparar 2 archivos":
                 ("DuracionTranscurridaMs", "Diferencia duración transcurrida (ms)"),
                 ("DuracionPromedioMs", "Diferencia duración promedio (ms)"),
                 ("PicoUsoCPU", "Diferencia pico promedio CPU (%)"),
+                ("PicoMaximoCPU", "Diferencia pico máximo CPU (%)"),
+                ("TiempoSobreUmbralMs", "Diferencia tiempo sobre umbral (ms)"),
                 ("TotalInputBytes", "Diferencia tamaño (bytes)"),
                 ("TotalRecords", "Diferencia records"),
             ]
@@ -459,6 +523,9 @@ if app_mode == "Comparar 2 archivos":
                 "DuracionTranscurridaMs",
                 "DuracionPromedioMs",
                 "PicoUsoCPU",
+                "PicoMaximoCPU",
+                "TiempoSobreUmbralMs",
+                "UmbralCPUPercent",
                 "TamanoTotal",
                 "TotalRecords",
             ]
@@ -467,6 +534,12 @@ if app_mode == "Comparar 2 archivos":
                 "MediaUsoCPU B": st.column_config.NumberColumn("CPU media ponderada", format="%.2f%%"),
                 "PicoUsoCPU A": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
                 "PicoUsoCPU B": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
+                "PicoMaximoCPU A": st.column_config.NumberColumn("Pico máximo CPU", format="%.2f%%"),
+                "PicoMaximoCPU B": st.column_config.NumberColumn("Pico máximo CPU", format="%.2f%%"),
+                "TiempoSobreUmbralMs A": st.column_config.NumberColumn("Tiempo sobre umbral (ms)", format="%.0f"),
+                "TiempoSobreUmbralMs B": st.column_config.NumberColumn("Tiempo sobre umbral (ms)", format="%.0f"),
+                "UmbralCPUPercent A": st.column_config.NumberColumn("Umbral CPU", format="%.2f%%"),
+                "UmbralCPUPercent B": st.column_config.NumberColumn("Umbral CPU", format="%.2f%%"),
                 "DuracionTranscurridaMs A": st.column_config.NumberColumn("Duración transcurrida (ms)", format="%.0f"),
                 "DuracionTranscurridaMs B": st.column_config.NumberColumn("Duración transcurrida (ms)", format="%.0f"),
                 "DuracionPromedioMs A": st.column_config.NumberColumn("Duración promedio (ms)", format="%.2f"),
@@ -508,6 +581,12 @@ if app_mode == "Comparar 2 archivos":
                     ),
                     "Diferencia pico promedio CPU (%)": st.column_config.NumberColumn(
                         "Pico promedio CPU (%)", format="%.2f"
+                    ),
+                    "Diferencia pico máximo CPU (%)": st.column_config.NumberColumn(
+                        "Pico máximo CPU (%)", format="%.2f"
+                    ),
+                    "Diferencia tiempo sobre umbral (ms)": st.column_config.NumberColumn(
+                        "Tiempo sobre umbral (ms)", format="%.0f"
                     ),
                     "Diferencia tamaño (bytes)": st.column_config.NumberColumn("Tamaño (bytes)", format="%.0f"),
                     "Diferencia records": st.column_config.NumberColumn("Records", format="%.0f"),
@@ -607,6 +686,9 @@ if app_mode == "Comparar 2 archivos":
                 tooltip_format=",.0f",
                 axis_format=",.0f",
             )
+            st.subheader("Pico máximo de CPU y tiempo sobre umbral")
+            st.caption("El tiempo se mide sobre CpuThresholdPercent, no sobre el pico máximo de CPU.")
+            render_peak_vs_threshold_time_chart(comparison_chart_data, series_field="Comparacion")
     else:
         st.info("Carga los archivos A y B para ver su comparación por JobNumber.")
 else:
@@ -748,6 +830,13 @@ if app_mode == "Analizar archivos" and file_sources:
                     "Pico promedio CPU",
                 )
 
+        st.subheader("Pico máximo de CPU y tiempo sobre umbral")
+        st.caption("El tiempo se mide sobre CpuThresholdPercent, no sobre el pico máximo de CPU.")
+        if chart_view == "Por registro":
+            render_peak_vs_threshold_time_chart(records_df, per_record=True)
+        else:
+            render_peak_vs_threshold_time_chart(metrics_df)
+
         st.subheader("Tamaño total de archivos por JobNumber")
         input_size_chart_type = select_chart_type("chart_type_input_size")
         input_size_chart = (
@@ -806,6 +895,9 @@ if app_mode == "Analizar archivos" and file_sources:
                     "DuracionTranscurridaMs",
                     "DuracionPromedioMs",
                     "PicoUsoCPU",
+                    "PicoMaximoCPU",
+                    "TiempoSobreUmbralMs",
+                    "UmbralCPUPercent",
                     "TamanoTotal",
                     "TotalRecords",
                     "DuracionMinutos",
@@ -815,6 +907,9 @@ if app_mode == "Analizar archivos" and file_sources:
             column_config={
                 "MediaUsoCPU": st.column_config.NumberColumn("CPU media ponderada", format="%.2f%%"),
                 "PicoUsoCPU": st.column_config.NumberColumn("Pico promedio CPU", format="%.2f%%"),
+                "PicoMaximoCPU": st.column_config.NumberColumn("Pico máximo CPU", format="%.2f%%"),
+                "TiempoSobreUmbralMs": st.column_config.NumberColumn("Tiempo sobre umbral (ms)", format="%.0f"),
+                "UmbralCPUPercent": st.column_config.NumberColumn("Umbral CPU", format="%.2f%%"),
                 "DuracionTranscurridaMs": st.column_config.NumberColumn(
                     "Duración transcurrida (ms)", format="%.0f"
                 ),
